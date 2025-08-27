@@ -2,6 +2,7 @@ package workers
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -18,9 +19,10 @@ type IHealthcheckWorker interface {
 	Stop()
 }
 
-type HealthcheckWorker struct {
+type healthcheckWorker struct {
 	dockerClient       docker.IDockerClient
 	healthcheckService services.IHealthcheckService
+	kafkaProducer      interfaces.IKafkaProducer
 	redisClient        interfaces.IRedisClient
 	logger             logger.ILogger
 	interval           time.Duration
@@ -32,14 +34,16 @@ type HealthcheckWorker struct {
 func NewHealthcheckWorker(
 	dockerClient docker.IDockerClient,
 	healthcheckService services.IHealthcheckService,
+	kafkaProducer interfaces.IKafkaProducer,
 	redisClient interfaces.IRedisClient,
 	logger logger.ILogger,
 	interval time.Duration,
 ) IHealthcheckWorker {
 	ctx, cancel := context.WithCancel(context.Background())
-	return &HealthcheckWorker{
+	return &healthcheckWorker{
 		dockerClient:       dockerClient,
 		healthcheckService: healthcheckService,
+		kafkaProducer:      kafkaProducer,
 		redisClient:        redisClient,
 		logger:             logger,
 		interval:           interval,
@@ -49,17 +53,17 @@ func NewHealthcheckWorker(
 	}
 }
 
-func (w *HealthcheckWorker) Start(numWorkers int) {
+func (w *healthcheckWorker) Start(numWorkers int) {
 	w.wg.Add(numWorkers)
 	go w.run()
 }
 
-func (w *HealthcheckWorker) Stop() {
+func (w *healthcheckWorker) Stop() {
 	w.cancel()
 	w.wg.Wait()
 }
 
-func (w *HealthcheckWorker) run() {
+func (w *healthcheckWorker) run() {
 	defer w.wg.Done()
 
 	ticker := time.NewTicker(w.interval)
@@ -68,7 +72,7 @@ func (w *HealthcheckWorker) run() {
 	for {
 		select {
 		case <-w.ctx.Done():
-			w.logger.Info("elasticsearch status workers stopped")
+			w.logger.Info("healthcheck status workers stopped")
 			return
 		case <-ticker.C:
 			w.updateHealthcheck()
@@ -76,7 +80,7 @@ func (w *HealthcheckWorker) run() {
 	}
 }
 
-func (w *HealthcheckWorker) updateHealthcheck() {
+func (w *healthcheckWorker) updateHealthcheck() {
 	containers, err := w.redisClient.Get(w.ctx, "containers")
 	if err != nil {
 		w.logger.Error("failed to get container ids from redis", zap.Error(err))
@@ -87,10 +91,21 @@ func (w *HealthcheckWorker) updateHealthcheck() {
 
 	for _, container := range containers {
 		status := w.dockerClient.GetStatus(w.ctx, container.ContainerId)
+		updateStatus := dto.KafkaStatusUpdate{
+			ContainerId: container.ContainerId,
+			Status:      status,
+			Ipv4:        w.dockerClient.GetIpv4(w.ctx, container.ContainerId),
+		}
+		kafkaMessage, err := json.Marshal(updateStatus)
+		if err != nil {
+			w.logger.Error("failed to marshal kafka message", zap.String("container_id", container.ContainerId), zap.Error(err))
+			continue
+		}
 		if status != container.Status {
-			// if err := w.containerService.Update(w.ctx, container.ContainerId, dto.ContainerUpdate{Status: status}); err != nil {
-			// 	w.logger.Error("failed to update container", zap.String("container_id", container.ContainerId))
-			// }
+			if err := w.kafkaProducer.Produce(w.ctx, kafkaMessage); err != nil {
+				w.logger.Error("failed to send kafka message", zap.String("container_id", container.ContainerId), zap.Error(err))
+				continue
+			}
 		}
 		statusList = append(statusList, dto.EsStatusUpdate{
 			ContainerId: container.ContainerId,
@@ -102,5 +117,5 @@ func (w *HealthcheckWorker) updateHealthcheck() {
 		w.logger.Error("failed to update elasticsearch status", zap.Error(err))
 		return
 	}
-	w.logger.Info("elasticsearch status updated successfully")
+	w.logger.Info("healthcheck status updated successfully")
 }

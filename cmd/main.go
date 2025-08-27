@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/vnFuhung2903/vcs-healthcheck-service/infrastructures/databases"
+	"github.com/vnFuhung2903/vcs-healthcheck-service/infrastructures/messages"
 	"github.com/vnFuhung2903/vcs-healthcheck-service/interfaces"
 	"github.com/vnFuhung2903/vcs-healthcheck-service/pkg/docker"
 	"github.com/vnFuhung2903/vcs-healthcheck-service/pkg/env"
@@ -36,6 +37,12 @@ func main() {
 	redisRawClient := databases.NewRedisFactory(env.RedisEnv).ConnectRedis()
 	redisClient := interfaces.NewRedisClient(redisRawClient)
 
+	kafkaWriter, err := messages.NewKafkaFactory(env.KafkaEnv).ConnectKafkaWriter("healthcheck")
+	if err != nil {
+		log.Fatalf("Failed to create kafka writer: %v", err)
+	}
+	kafkaProducer := interfaces.NewKafkaProducer(kafkaWriter, "healthcheck")
+
 	dockerClient, err := docker.NewDockerClient()
 	if err != nil {
 		log.Fatalf("Failed to create docker client: %v", err)
@@ -46,6 +53,7 @@ func main() {
 	healthcheckWorker := workers.NewHealthcheckWorker(
 		dockerClient,
 		healthcheckService,
+		kafkaProducer,
 		redisClient,
 		logger,
 		10*time.Second,
@@ -61,4 +69,6 @@ func main() {
 		healthcheckWorker.Stop()
 		os.Exit(0)
 	}()
+
+	select {}
 }

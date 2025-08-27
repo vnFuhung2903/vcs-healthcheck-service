@@ -21,19 +21,19 @@ type IHealthcheckService interface {
 	GetEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error)
 }
 
-type HealthcheckService struct {
+type healthcheckService struct {
 	esClient interfaces.IElasticsearchClient
 	logger   logger.ILogger
 }
 
 func NewHealthcheckService(esClient interfaces.IElasticsearchClient, logger logger.ILogger) IHealthcheckService {
-	return &HealthcheckService{
+	return &healthcheckService{
 		esClient: esClient,
 		logger:   logger,
 	}
 }
 
-func (s *HealthcheckService) UpdateStatus(ctx context.Context, statusList []dto.EsStatusUpdate, interval time.Duration) error {
+func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.EsStatusUpdate, interval time.Duration) error {
 	var buf bytes.Buffer
 	indexName := "sms_container"
 
@@ -146,7 +146,7 @@ func (s *HealthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 	return nil
 }
 
-func (s *HealthcheckService) GetEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
+func (s *healthcheckService) GetEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
 	var body strings.Builder
 
 	for _, id := range ids {

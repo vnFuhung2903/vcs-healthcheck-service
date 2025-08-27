@@ -10,6 +10,10 @@ type ElasticsearchEnv struct {
 	ElasticsearchAddress string
 }
 
+type KafkaEnv struct {
+	KafkaAddress string
+}
+
 type RedisEnv struct {
 	RedisAddress  string
 	RedisPassword string
@@ -26,6 +30,7 @@ type LoggerEnv struct {
 
 type Env struct {
 	ElasticsearchEnv ElasticsearchEnv
+	KafkaEnv         KafkaEnv
 	RedisEnv         RedisEnv
 	LoggerEnv        LoggerEnv
 }
@@ -35,6 +40,7 @@ func LoadEnv() (*Env, error) {
 	v.AutomaticEnv()
 
 	v.SetDefault("ELASTICSEARCH_ADDRESS", "http://localhost:9200")
+	v.SetDefault("KAFKA_ADDRESS", "localhost:9092")
 	v.SetDefault("REDIS_ADDRESS", "localhost:6379")
 	v.SetDefault("REDIS_PASSWORD", "")
 	v.SetDefault("REDIS_DB", 0)
@@ -49,6 +55,13 @@ func LoadEnv() (*Env, error) {
 	}
 	if elasticsearchEnv.ElasticsearchAddress == "" {
 		return nil, errors.New("elasticsearch environment variables are empty")
+	}
+
+	kafkaEnv := KafkaEnv{
+		KafkaAddress: v.GetString("KAFKA_ADDRESS"),
+	}
+	if kafkaEnv.KafkaAddress == "" {
+		return nil, errors.New("kafka environment variables are empty")
 	}
 
 	redisEnv := RedisEnv{
@@ -73,6 +86,7 @@ func LoadEnv() (*Env, error) {
 
 	return &Env{
 		ElasticsearchEnv: elasticsearchEnv,
+		KafkaEnv:         kafkaEnv,
 		RedisEnv:         redisEnv,
 		LoggerEnv:        loggerEnv,
 	}, nil
