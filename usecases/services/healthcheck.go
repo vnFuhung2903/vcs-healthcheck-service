@@ -164,7 +164,7 @@ func (s *healthcheckService) GetEsStatus(ctx context.Context, ids []string, limi
 							"range": map[string]interface{}{
 								"last_updated": map[string]string{
 									"gte": startTime.Format(time.RFC3339),
-									"lt":  endTime.Format(time.RFC3339),
+									"lte": endTime.Format(time.RFC3339),
 								},
 							},
 						},

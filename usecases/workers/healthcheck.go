@@ -91,21 +91,22 @@ func (w *healthcheckWorker) updateHealthcheck() {
 
 	for _, container := range containers {
 		status := w.dockerClient.GetStatus(w.ctx, container.ContainerId)
-		updateStatus := dto.KafkaStatusUpdate{
-			ContainerId: container.ContainerId,
-			Status:      status,
-			Ipv4:        w.dockerClient.GetIpv4(w.ctx, container.ContainerId),
-		}
-		kafkaMessage, err := json.Marshal(updateStatus)
-		if err != nil {
-			w.logger.Error("failed to marshal kafka message", zap.String("container_id", container.ContainerId), zap.Error(err))
-			continue
-		}
 		if status != container.Status {
+			updateStatus := dto.KafkaStatusUpdate{
+				ContainerId: container.ContainerId,
+				Status:      status,
+				Ipv4:        w.dockerClient.GetIpv4(w.ctx, container.ContainerId),
+			}
+			kafkaMessage, err := json.Marshal(updateStatus)
+			if err != nil {
+				w.logger.Error("failed to marshal kafka message", zap.String("container_id", container.ContainerId), zap.Error(err))
+				continue
+			}
 			if err := w.kafkaProducer.Produce(w.ctx, kafkaMessage); err != nil {
 				w.logger.Error("failed to send kafka message", zap.String("container_id", container.ContainerId), zap.Error(err))
 				continue
 			}
+			w.logger.Info("kafka producer sent message successfully", zap.String("container_id", container.ContainerId), zap.String("status", string(status)))
 		}
 		statusList = append(statusList, dto.EsStatusUpdate{
 			ContainerId: container.ContainerId,
