@@ -17,8 +17,7 @@ import (
 )
 
 type IHealthcheckService interface {
-	UpdateStatus(ctx context.Context, statusList []dto.EsStatusUpdate, interval time.Duration) error
-	GetEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error)
+	UpdateStatus(ctx context.Context, statusList []dto.StatusUpdate, interval time.Duration) error
 }
 
 type healthcheckService struct {
@@ -33,7 +32,7 @@ func NewHealthcheckService(esClient interfaces.IElasticsearchClient, logger logg
 	}
 }
 
-func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.EsStatusUpdate, interval time.Duration) error {
+func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.StatusUpdate, interval time.Duration) error {
 	var buf bytes.Buffer
 	indexName := "sms_container"
 
@@ -46,18 +45,18 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 	startTime := endTime.Add(-interval)
 	var zeroTime time.Time
 
-	existingDocs, err := s.GetEsStatus(ctx, ids, 1, startTime, endTime, dto.Dsc)
+	existingDocs, err := s.getEsStatus(ctx, ids, 1, startTime, endTime, dto.Dsc)
 	if err != nil {
 		return err
 	}
-	previousDocs, err := s.GetEsStatus(ctx, ids, 1, zeroTime, startTime, dto.Dsc)
+	previousDocs, err := s.getEsStatus(ctx, ids, 1, zeroTime, startTime, dto.Dsc)
 	if err != nil {
 		return err
 	}
 
 	for _, status := range statusList {
 		var (
-			meta interface{}
+			meta dto.BulkMeta
 			doc  interface{}
 		)
 
@@ -70,10 +69,10 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 			if len(previous) > 0 {
 				nextCounter = previous[0].Counter + 1
 			}
-			meta = map[string]map[string]string{
-				"index": {
-					"_index": indexName,
-					"_id":    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
+			meta = dto.BulkMeta{
+				Index: &dto.BaseMeta{
+					Index: indexName,
+					ID:    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
 				},
 			}
 			doc = dto.EsStatus{
@@ -85,25 +84,28 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 			}
 
 		case old[0].Status == status.Status:
-			meta = map[string]map[string]string{
-				"update": {
-					"_index": indexName,
-					"_id":    fmt.Sprintf("%s_%d", status.ContainerId, old[0].Counter),
+			meta = dto.BulkMeta{
+				Update: &dto.BaseMeta{
+					Index: indexName,
+					ID:    fmt.Sprintf("%s_%d", status.ContainerId, old[0].Counter),
 				},
 			}
-			doc = map[string]interface{}{
-				"doc": map[string]interface{}{
-					"uptime":       old[0].Uptime + int64(endTime.Sub(old[0].LastUpdated).Seconds()),
-					"last_updated": endTime,
+			doc = map[string]dto.EsStatus{
+				"doc": {
+					ContainerId: status.ContainerId,
+					Status:      status.Status,
+					Uptime:      old[0].Uptime + int64(endTime.Sub(old[0].LastUpdated).Seconds()),
+					LastUpdated: endTime,
+					Counter:     old[0].Counter,
 				},
 			}
 
 		default:
 			nextCounter := old[0].Counter + 1
-			meta = map[string]map[string]string{
-				"index": {
-					"_index": indexName,
-					"_id":    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
+			meta = dto.BulkMeta{
+				Index: &dto.BaseMeta{
+					Index: indexName,
+					ID:    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
 				},
 			}
 			doc = dto.EsStatus{
@@ -146,7 +148,7 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 	return nil
 }
 
-func (s *healthcheckService) GetEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
+func (s *healthcheckService) getEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
 	var body strings.Builder
 
 	for _, id := range ids {

@@ -35,12 +35,14 @@ func main() {
 	esClient := interfaces.NewElasticsearchClient(esRawClient)
 
 	redisRawClient := databases.NewRedisFactory(env.RedisEnv).ConnectRedis()
+	defer redisRawClient.Close()
 	redisClient := interfaces.NewRedisClient(redisRawClient)
 
 	kafkaWriter, err := messages.NewKafkaFactory(env.KafkaEnv).ConnectKafkaWriter("healthcheck")
 	if err != nil {
 		log.Fatalf("Failed to create kafka writer: %v", err)
 	}
+	defer kafkaWriter.Close()
 	kafkaProducer := interfaces.NewKafkaProducer(kafkaWriter, "healthcheck")
 
 	dockerClient, err := docker.NewDockerClient()
@@ -57,18 +59,12 @@ func main() {
 		redisClient,
 		logger,
 		10*time.Second,
+		10000/env.WorkerEnv.Count,
 	)
-	healthcheckWorker.Start(1)
+	healthcheckWorker.Start(env.WorkerEnv.Count)
+	defer healthcheckWorker.Stop()
 
-	go func() {
-		quit := make(chan os.Signal, 1)
-		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-		<-quit
-
-		logger.Info("Shutting down...")
-		healthcheckWorker.Stop()
-		os.Exit(0)
-	}()
-
-	select {}
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
 }
