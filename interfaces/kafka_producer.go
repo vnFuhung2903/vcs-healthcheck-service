@@ -34,8 +34,5 @@ func (p *kafkaProducer) AddMessage(msg dto.KafkaStatusUpdate) (kafka.Message, er
 }
 
 func (p *kafkaProducer) Produce(ctx context.Context, msgs []kafka.Message) error {
-	if len(msgs) == 0 {
-		return nil
-	}
 	return p.writer.WriteMessages(ctx, msgs...)
 }

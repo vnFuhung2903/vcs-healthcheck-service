@@ -58,10 +58,9 @@ func main() {
 		kafkaProducer,
 		redisClient,
 		logger,
-		10*time.Second,
-		10000/env.WorkerEnv.Count,
+		30*time.Second,
 	)
-	healthcheckWorker.Start(env.WorkerEnv.Count)
+	healthcheckWorker.Start()
 	defer healthcheckWorker.Stop()
 
 	quit := make(chan os.Signal, 1)

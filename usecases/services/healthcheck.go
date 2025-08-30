@@ -17,7 +17,7 @@ import (
 )
 
 type IHealthcheckService interface {
-	UpdateStatus(ctx context.Context, statusList []dto.StatusUpdate, interval time.Duration) error
+	Update(ctx context.Context, batch []dto.StatusUpdate, interval time.Duration) error
 }
 
 type healthcheckService struct {
@@ -32,36 +32,31 @@ func NewHealthcheckService(esClient interfaces.IElasticsearchClient, logger logg
 	}
 }
 
-func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.StatusUpdate, interval time.Duration) error {
+func (s *healthcheckService) Update(ctx context.Context, batch []dto.StatusUpdate, interval time.Duration) error {
 	var buf bytes.Buffer
 	indexName := "sms_container"
-
-	var ids []string
-	for _, status := range statusList {
-		ids = append(ids, status.ContainerId)
-	}
 
 	endTime := time.Now()
 	startTime := endTime.Add(-interval)
 	var zeroTime time.Time
 
-	existingDocs, err := s.getEsStatus(ctx, ids, 1, startTime, endTime, dto.Dsc)
+	existingDocs, err := s.getEsStatus(ctx, batch, 1, startTime, endTime, dto.Dsc)
 	if err != nil {
 		return err
 	}
-	previousDocs, err := s.getEsStatus(ctx, ids, 1, zeroTime, startTime, dto.Dsc)
+	previousDocs, err := s.getEsStatus(ctx, batch, 1, zeroTime, startTime, dto.Dsc)
 	if err != nil {
 		return err
 	}
 
-	for _, status := range statusList {
+	for _, statusUpdate := range batch {
 		var (
 			meta dto.BulkMeta
 			doc  interface{}
 		)
 
-		old := existingDocs[status.ContainerId]
-		previous := previousDocs[status.ContainerId]
+		old := existingDocs[statusUpdate.ContainerId]
+		previous := previousDocs[statusUpdate.ContainerId]
 
 		switch {
 		case len(old) == 0:
@@ -72,28 +67,28 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 			meta = dto.BulkMeta{
 				Index: &dto.BaseMeta{
 					Index: indexName,
-					ID:    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
+					ID:    fmt.Sprintf("%s_%d", statusUpdate.ContainerId, nextCounter),
 				},
 			}
 			doc = dto.EsStatus{
-				ContainerId: status.ContainerId,
-				Status:      status.Status,
+				ContainerId: statusUpdate.ContainerId,
+				Status:      statusUpdate.Status,
 				LastUpdated: endTime,
 				Uptime:      int64(interval.Seconds()),
 				Counter:     nextCounter,
 			}
 
-		case old[0].Status == status.Status:
+		case old[0].Status == statusUpdate.Status:
 			meta = dto.BulkMeta{
 				Update: &dto.BaseMeta{
 					Index: indexName,
-					ID:    fmt.Sprintf("%s_%d", status.ContainerId, old[0].Counter),
+					ID:    fmt.Sprintf("%s_%d", statusUpdate.ContainerId, old[0].Counter),
 				},
 			}
 			doc = map[string]dto.EsStatus{
 				"doc": {
-					ContainerId: status.ContainerId,
-					Status:      status.Status,
+					ContainerId: statusUpdate.ContainerId,
+					Status:      statusUpdate.Status,
 					Uptime:      old[0].Uptime + int64(endTime.Sub(old[0].LastUpdated).Seconds()),
 					LastUpdated: endTime,
 					Counter:     old[0].Counter,
@@ -105,12 +100,12 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 			meta = dto.BulkMeta{
 				Index: &dto.BaseMeta{
 					Index: indexName,
-					ID:    fmt.Sprintf("%s_%d", status.ContainerId, nextCounter),
+					ID:    fmt.Sprintf("%s_%d", statusUpdate.ContainerId, nextCounter),
 				},
 			}
 			doc = dto.EsStatus{
-				ContainerId: status.ContainerId,
-				Status:      status.Status,
+				ContainerId: statusUpdate.ContainerId,
+				Status:      statusUpdate.Status,
 				Uptime:      int64(endTime.Sub(old[0].LastUpdated).Seconds()),
 				LastUpdated: endTime,
 				Counter:     nextCounter,
@@ -148,10 +143,10 @@ func (s *healthcheckService) UpdateStatus(ctx context.Context, statusList []dto.
 	return nil
 }
 
-func (s *healthcheckService) getEsStatus(ctx context.Context, ids []string, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
+func (s *healthcheckService) getEsStatus(ctx context.Context, batch []dto.StatusUpdate, limit int, startTime time.Time, endTime time.Time, order dto.SortOrder) (map[string][]dto.EsStatus, error) {
 	var body strings.Builder
 
-	for _, id := range ids {
+	for _, statusUpdate := range batch {
 		meta := map[string]string{"index": "sms_container"}
 		metaLine, _ := json.Marshal(meta)
 		body.Write(metaLine)
@@ -161,7 +156,7 @@ func (s *healthcheckService) getEsStatus(ctx context.Context, ids []string, limi
 			"query": map[string]interface{}{
 				"bool": map[string]interface{}{
 					"must": []interface{}{
-						map[string]interface{}{"term": map[string]string{"container_id.keyword": id}},
+						map[string]interface{}{"term": map[string]string{"container_id.keyword": statusUpdate.ContainerId}},
 						map[string]interface{}{
 							"range": map[string]interface{}{
 								"last_updated": map[string]string{
@@ -216,7 +211,7 @@ func (s *healthcheckService) getEsStatus(ctx context.Context, ids []string, limi
 
 	results := make(map[string][]dto.EsStatus)
 	for i, response := range parsed.Responses {
-		containerId := ids[i]
+		containerId := batch[i].ContainerId
 		for _, hit := range response.Hits.Hits {
 			results[containerId] = append(results[containerId], hit.Source)
 		}
