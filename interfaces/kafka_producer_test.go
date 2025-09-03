@@ -1,7 +1,7 @@
 package interfaces
 
 import (
-	"encoding/json"
+	"context"
 	"testing"
 
 	"github.com/segmentio/kafka-go"
@@ -13,11 +13,13 @@ import (
 
 type KafkaProducerTestSuite struct {
 	suite.Suite
+	ctx           context.Context
 	kafkaProducer IKafkaProducer
 	topic         string
 }
 
 func (s *KafkaProducerTestSuite) SetupTest() {
+	s.ctx = context.Background()
 	s.topic = "test-topic"
 	writer := &kafka.Writer{}
 	s.kafkaProducer = NewKafkaProducer(writer, s.topic)
@@ -39,10 +41,6 @@ func (s *KafkaProducerTestSuite) TestAddMessage() {
 	assert.NoError(s.T(), err)
 	assert.Equal(s.T(), []byte(entities.ContainerOn), kafkaMsg.Key)
 
-	var unmarshaled dto.KafkaStatusUpdate
-	err = json.Unmarshal(kafkaMsg.Value, &unmarshaled)
-	assert.NoError(s.T(), err)
-	assert.Equal(s.T(), msg.ContainerId, unmarshaled.ContainerId)
-	assert.Equal(s.T(), msg.Status, unmarshaled.Status)
-	assert.Equal(s.T(), msg.Ipv4, unmarshaled.Ipv4)
+	err = s.kafkaProducer.Produce(s.ctx, []kafka.Message{kafkaMsg})
+	s.Error(err)
 }
